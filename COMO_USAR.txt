@@ -1,0 +1,6 @@
+1. Abrí una terminal dentro de esta carpeta.
+2. Ejecutá: py -m pip install -r requirements.txt
+3. Ejecutá: py app.py
+4. En Resumen, hacé doble clic en un artículo.
+5. Asigná cantidades y guardá.
+6. Revisá Distribución y Reportes.

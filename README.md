@@ -211,7 +211,7 @@ Este proyecto demuestra experiencia práctica en:
 
 ## Autor
 
-**TU NOMBRE**
+**JOAQUIN BAIGORRIA**
 
-- LinkedIn: `URL_DE_TU_LINKEDIN`
-- GitHub: `URL_DE_TU_GITHUB`
+- LinkedIn: https://www.linkedin.com/in/joaquin-baigorria-5224b0a0/
+- GitHub: https://github.com/joabaigo10

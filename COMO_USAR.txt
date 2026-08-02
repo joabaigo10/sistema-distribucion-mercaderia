@@ -1,6 +1,12 @@
+DISTRIBUTION MANAGER · DEMO DE PORTFOLIO
+
 1. Abrí una terminal dentro de esta carpeta.
-2. Ejecutá: py -m pip install -r requirements.txt
-3. Ejecutá: py app.py
-4. En Resumen, hacé doble clic en un artículo.
-5. Asigná cantidades y guardá.
-6. Revisá Distribución y Reportes.
+2. Creá un entorno virtual: py -m venv .venv
+3. Activá el entorno: .venv\Scripts\activate
+4. Instalá dependencias: py -m pip install -r requirements.txt
+5. Ejecutá la aplicación: py app.py
+6. En Resumen, hacé doble clic sobre un artículo.
+7. Elegí un banner, asigná cantidades y guardá.
+8. Revisá Distribución, Reportes y la exportación a Excel.
+
+La aplicación usa datos ficticios y crea una base SQLite local en data/.

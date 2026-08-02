@@ -1,415 +1,388 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+from data_store import DistributionStore
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "distribucion_demo.db"
+DB_PATH = DATA_DIR / "distribution_demo.db"
 SAMPLE_XLSX = DATA_DIR / "remitos_demo.xlsx"
+EXPORT_DIR = BASE_DIR / "exports"
 
-LOCALES_POR_BANNER = {
-    "DEPORTE": ["LOCAL CENTRO", "LOCAL NORTE", "E-COMMERCE", "ALMACEN DEPORTE"],
-    "MODA": ["MODA STORE", "LOCAL SUR", "ALMACEN MODA"],
-    "JB": ["LOCAL JB", "ALMACEN JB"],
+BANNERS = {
+    "DEPORTE": ["LOCAL CENTRO", "LOCAL NORTE", "E-COMMERCE", "ALMACÉN DEPORTE"],
+    "MODA": ["MODA STORE", "LOCAL SUR", "ALMACÉN MODA"],
+    "JB": ["LOCAL JB", "ALMACÉN JB"],
+}
+
+COLORS = {
+    "navy": "#122033", "blue": "#2457D6", "bg": "#F4F6FA", "card": "#FFFFFF",
+    "text": "#182230", "muted": "#667085", "border": "#DDE3EA", "green": "#137A55",
+    "orange": "#B54708", "red": "#B42318", "selected": "#EAF0FF",
 }
 
 
-def conectar() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def inicializar_db() -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    with conectar() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS remitos (
-                remito TEXT PRIMARY KEY,
-                empresa TEXT,
-                proveedor TEXT,
-                factura TEXT,
-                fecha TEXT,
-                estado TEXT NOT NULL DEFAULT 'no_trabajado'
-            );
-
-            CREATE TABLE IF NOT EXISTS articulos (
-                remito TEXT NOT NULL,
-                articulo TEXT NOT NULL,
-                descripcion TEXT,
-                marca TEXT,
-                estado TEXT NOT NULL DEFAULT 'no_trabajado',
-                PRIMARY KEY (remito, articulo)
-            );
-
-            CREATE TABLE IF NOT EXISTS stock_inicial (
-                remito TEXT NOT NULL,
-                articulo TEXT NOT NULL,
-                talle TEXT NOT NULL,
-                cantidad INTEGER NOT NULL,
-                PRIMARY KEY (remito, articulo, talle)
-            );
-
-            CREATE TABLE IF NOT EXISTS asignaciones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                remito TEXT NOT NULL,
-                articulo TEXT NOT NULL,
-                local TEXT NOT NULL,
-                talle TEXT NOT NULL,
-                cantidad INTEGER NOT NULL,
-                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-
-
-class DistribucionDemo(tk.Tk):
+class DistributionManager(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Sistema de Distribución de Mercadería - Demo Portfolio")
-        self.geometry("1180x720")
-        self.minsize(1000, 620)
-
-        inicializar_db()
-        self.df_actual = pd.DataFrame()
+        self.title("Distribution Manager · Portfolio Demo")
+        self.geometry("1280x790")
+        self.minsize(1080, 680)
+        self.configure(bg=COLORS["bg"])
+        self.store = DistributionStore(DB_PATH)
         self.remito_actual: str | None = None
         self.articulo_actual: str | None = None
-        self.talles_actuales: list[str] = []
         self.stock_actual: dict[str, int] = {}
-        self.entries: dict[tuple[str, str], tk.Entry] = {}
+        self.entries: dict[tuple[str, str], ttk.Entry] = {}
+        self.row_total_labels: dict[str, ttk.Label] = {}
+        self._configure_style()
+        self._build_ui()
+        self._load_demo_if_empty()
+        self.refresh_all()
 
-        self.crear_ui()
-        self.cargar_demo_si_vacia()
-        self.refrescar_todo()
+    def _configure_style(self) -> None:
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure("TFrame", background=COLORS["bg"])
+        style.configure("Card.TFrame", background=COLORS["card"], relief="flat")
+        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI", 10))
+        style.configure("Card.TLabel", background=COLORS["card"], foreground=COLORS["text"])
+        style.configure("Title.TLabel", font=("Segoe UI Semibold", 21), foreground="white", background=COLORS["navy"])
+        style.configure("Subtitle.TLabel", font=("Segoe UI", 10), foreground="#C9D4E5", background=COLORS["navy"])
+        style.configure("Metric.TLabel", font=("Segoe UI Semibold", 22), background=COLORS["card"], foreground=COLORS["text"])
+        style.configure("MetricName.TLabel", font=("Segoe UI", 9), background=COLORS["card"], foreground=COLORS["muted"])
+        style.configure("Primary.TButton", font=("Segoe UI Semibold", 10), padding=(14, 9), background=COLORS["blue"], foreground="white")
+        style.map("Primary.TButton", background=[("active", "#1947BC")])
+        style.configure("Secondary.TButton", font=("Segoe UI", 10), padding=(12, 8), background="white", foreground=COLORS["text"], bordercolor=COLORS["border"])
+        style.configure("TNotebook", background=COLORS["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab", font=("Segoe UI Semibold", 10), padding=(18, 10), background="#E8ECF2", foreground=COLORS["muted"])
+        style.map("TNotebook.Tab", background=[("selected", "white")], foreground=[("selected", COLORS["blue"])])
+        style.configure("Treeview", font=("Segoe UI", 9), rowheight=31, background="white", fieldbackground="white", foreground=COLORS["text"], bordercolor=COLORS["border"])
+        style.configure("Treeview.Heading", font=("Segoe UI Semibold", 9), background="#EEF2F7", foreground=COLORS["text"], relief="flat", padding=7)
+        style.map("Treeview", background=[("selected", COLORS["selected"])], foreground=[("selected", COLORS["text"])])
+        style.configure("TEntry", padding=6)
+        style.configure("TCombobox", padding=6)
 
-    def crear_ui(self) -> None:
-        barra = ttk.Frame(self, padding=8)
-        barra.pack(fill="x")
-        ttk.Button(barra, text="Cargar Excel", command=self.cargar_excel).pack(side="left", padx=4)
-        ttk.Button(barra, text="Cargar archivo demo", command=self.cargar_archivo_demo).pack(side="left", padx=4)
-        ttk.Button(barra, text="Exportar reporte", command=self.exportar_reporte).pack(side="left", padx=4)
-        ttk.Label(barra, text="Demo pública: datos ficticios + SQLite local", foreground="#555").pack(side="right")
+    def _build_ui(self) -> None:
+        header = tk.Frame(self, bg=COLORS["navy"], height=104)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        title_wrap = ttk.Frame(header, style="TFrame")
+        title_wrap.configure(style="Header.TFrame")
+        ttk.Style(self).configure("Header.TFrame", background=COLORS["navy"])
+        title_wrap.pack(side="left", padx=24, pady=16)
+        ttk.Label(title_wrap, text="Distribution Manager", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(title_wrap, text="Asignación y control de mercadería · Demo pública con datos ficticios", style="Subtitle.TLabel").pack(anchor="w", pady=(3, 0))
+
+        actions = tk.Frame(header, bg=COLORS["navy"])
+        actions.pack(side="right", padx=24)
+        ttk.Button(actions, text="Importar Excel", command=self.load_excel, style="Primary.TButton").pack(side="left", padx=4)
+        ttk.Button(actions, text="Restablecer demo", command=self.reset_demo, style="Secondary.TButton").pack(side="left", padx=4)
+        ttk.Button(actions, text="Exportar", command=self.export_report, style="Secondary.TButton").pack(side="left", padx=4)
+
+        self.metrics_frame = ttk.Frame(self, padding=(18, 14), style="TFrame")
+        self.metrics_frame.pack(fill="x")
+        self.metric_labels: dict[str, ttk.Label] = {}
+        for index, (key, label) in enumerate((("remitos", "Remitos"), ("articulos", "Artículos"), ("unidades", "Unidades"), ("asignados", "Artículos asignados"))):
+            card = ttk.Frame(self.metrics_frame, padding=(18, 12), style="Card.TFrame")
+            card.grid(row=0, column=index, sticky="ew", padx=5)
+            self.metrics_frame.columnconfigure(index, weight=1)
+            value = ttk.Label(card, text="0", style="Metric.TLabel")
+            value.pack(anchor="w")
+            ttk.Label(card, text=label.upper(), style="MetricName.TLabel").pack(anchor="w")
+            self.metric_labels[key] = value
 
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.notebook.pack(fill="both", expand=True, padx=22, pady=(0, 18))
+        self.summary_tab = ttk.Frame(self.notebook, padding=14, style="Card.TFrame")
+        self.assignment_tab = ttk.Frame(self.notebook, padding=14, style="Card.TFrame")
+        self.distribution_tab = ttk.Frame(self.notebook, padding=14, style="Card.TFrame")
+        self.reports_tab = ttk.Frame(self.notebook, padding=14, style="Card.TFrame")
+        self.notebook.add(self.summary_tab, text="Resumen")
+        self.notebook.add(self.assignment_tab, text="Asignación")
+        self.notebook.add(self.distribution_tab, text="Distribución")
+        self.notebook.add(self.reports_tab, text="Reportes")
+        self._build_summary()
+        self._build_assignment()
+        self._build_distribution()
+        self._build_reports()
 
-        self.tab_resumen = ttk.Frame(self.notebook, padding=8)
-        self.tab_asignacion = ttk.Frame(self.notebook, padding=8)
-        self.tab_distribucion = ttk.Frame(self.notebook, padding=8)
-        self.tab_reportes = ttk.Frame(self.notebook, padding=8)
+    def _tree(self, parent: ttk.Frame, columns: tuple[str, ...], widths: tuple[int, ...]) -> ttk.Treeview:
+        wrapper = ttk.Frame(parent, style="Card.TFrame")
+        wrapper.pack(fill="both", expand=True)
+        tree = ttk.Treeview(wrapper, columns=columns, show="headings")
+        ybar = ttk.Scrollbar(wrapper, orient="vertical", command=tree.yview)
+        xbar = ttk.Scrollbar(wrapper, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        ybar.grid(row=0, column=1, sticky="ns")
+        xbar.grid(row=1, column=0, sticky="ew")
+        wrapper.rowconfigure(0, weight=1)
+        wrapper.columnconfigure(0, weight=1)
+        for column, width in zip(columns, widths):
+            tree.heading(column, text=column.replace("_", " ").upper())
+            tree.column(column, width=width, minwidth=70, anchor="center")
+        return tree
 
-        self.notebook.add(self.tab_resumen, text="Resumen")
-        self.notebook.add(self.tab_asignacion, text="Asignación")
-        self.notebook.add(self.tab_distribucion, text="Distribución")
-        self.notebook.add(self.tab_reportes, text="Reportes")
+    def _build_summary(self) -> None:
+        top = ttk.Frame(self.summary_tab, style="Card.TFrame")
+        top.pack(fill="x", pady=(0, 10))
+        ttk.Label(top, text="Remitos y artículos", style="Card.TLabel", font=("Segoe UI Semibold", 14)).pack(side="left")
+        ttk.Label(top, text="Doble clic para comenzar la distribución", style="Card.TLabel", foreground=COLORS["muted"]).pack(side="right")
+        columns = ("remito", "articulo", "descripcion", "marca", "total", "estado", "empresa")
+        self.summary_tree = self._tree(self.summary_tab, columns, (105, 135, 310, 100, 85, 120, 140))
+        self.summary_tree.bind("<Double-1>", self.open_selected_article)
+        self.summary_tree.tag_configure("asignado", foreground=COLORS["green"])
+        self.summary_tree.tag_configure("no_trabajado", foreground=COLORS["orange"])
 
-        self.crear_resumen()
-        self.crear_asignacion()
-        self.crear_distribucion()
-        self.crear_reportes()
+    def _build_assignment(self) -> None:
+        top = ttk.Frame(self.assignment_tab, style="Card.TFrame")
+        top.pack(fill="x", pady=(0, 12))
+        self.article_label = ttk.Label(top, text="Seleccioná un artículo desde Resumen", style="Card.TLabel", font=("Segoe UI Semibold", 14))
+        self.article_label.pack(side="left")
+        controls = ttk.Frame(top, style="Card.TFrame")
+        controls.pack(side="right")
+        ttk.Label(controls, text="Banner", style="Card.TLabel").pack(side="left", padx=(0, 6))
+        self.banner_var = tk.StringVar(value=next(iter(BANNERS)))
+        self.banner_combo = ttk.Combobox(controls, textvariable=self.banner_var, values=list(BANNERS), state="readonly", width=13)
+        self.banner_combo.pack(side="left")
+        self.banner_combo.bind("<<ComboboxSelected>>", lambda _event: self.build_assignment_grid())
 
-    def crear_resumen(self) -> None:
-        columnas = ("remito", "articulo", "descripcion", "total", "estado", "empresa")
-        self.tree_resumen = ttk.Treeview(self.tab_resumen, columns=columnas, show="headings")
-        for col, ancho in zip(columnas, (120, 150, 300, 90, 130, 150)):
-            self.tree_resumen.heading(col, text=col.upper())
-            self.tree_resumen.column(col, width=ancho, anchor="center")
-        self.tree_resumen.pack(fill="both", expand=True)
-        self.tree_resumen.bind("<Double-1>", self.abrir_desde_resumen)
-        ttk.Label(self.tab_resumen, text="Doble clic en un artículo para distribuirlo.").pack(anchor="w", pady=(6, 0))
+        grid_shell = ttk.Frame(self.assignment_tab, style="Card.TFrame")
+        grid_shell.pack(fill="both", expand=True)
+        self.assignment_canvas = tk.Canvas(grid_shell, bg="white", highlightthickness=0)
+        ybar = ttk.Scrollbar(grid_shell, orient="vertical", command=self.assignment_canvas.yview)
+        xbar = ttk.Scrollbar(grid_shell, orient="horizontal", command=self.assignment_canvas.xview)
+        self.assignment_grid = ttk.Frame(self.assignment_canvas, padding=4, style="Card.TFrame")
+        self.assignment_window = self.assignment_canvas.create_window((0, 0), window=self.assignment_grid, anchor="nw")
+        self.assignment_canvas.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        self.assignment_canvas.grid(row=0, column=0, sticky="nsew")
+        ybar.grid(row=0, column=1, sticky="ns")
+        xbar.grid(row=1, column=0, sticky="ew")
+        grid_shell.rowconfigure(0, weight=1)
+        grid_shell.columnconfigure(0, weight=1)
+        self.assignment_grid.bind("<Configure>", lambda _e: self.assignment_canvas.configure(scrollregion=self.assignment_canvas.bbox("all")))
 
-    def crear_asignacion(self) -> None:
-        superior = ttk.Frame(self.tab_asignacion)
-        superior.pack(fill="x")
-        self.lbl_articulo = ttk.Label(superior, text="Seleccione un artículo desde Resumen", font=("Arial", 14, "bold"))
-        self.lbl_articulo.pack(side="left")
+        bottom = ttk.Frame(self.assignment_tab, style="Card.TFrame")
+        bottom.pack(fill="x", pady=(12, 0))
+        self.remainder_label = ttk.Label(bottom, text="", style="Card.TLabel", foreground=COLORS["muted"])
+        self.remainder_label.pack(side="left")
+        ttk.Button(bottom, text="Guardar asignación", command=self.save_assignment, style="Primary.TButton").pack(side="right")
 
-        ttk.Label(superior, text="Banner:").pack(side="left", padx=(30, 4))
-        self.banner_var = tk.StringVar(value="OPEN")
-        self.combo_banner = ttk.Combobox(superior, textvariable=self.banner_var, values=list(LOCALES_POR_BANNER), state="readonly", width=12)
-        self.combo_banner.pack(side="left")
-        self.combo_banner.bind("<<ComboboxSelected>>", lambda _e: self.construir_grilla())
+    def _build_distribution(self) -> None:
+        ttk.Label(self.distribution_tab, text="Distribución consolidada", style="Card.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w", pady=(0, 10))
+        columns = ("remito", "articulo", "banner", "local", "talle", "cantidad")
+        self.distribution_tree = self._tree(self.distribution_tab, columns, (105, 135, 110, 230, 85, 95))
 
-        self.frame_grilla = ttk.Frame(self.tab_asignacion)
-        self.frame_grilla.pack(fill="both", expand=True, pady=12)
+    def _build_reports(self) -> None:
+        filters = ttk.Frame(self.reports_tab, style="Card.TFrame")
+        filters.pack(fill="x", pady=(0, 12))
+        ttk.Label(filters, text="Artículo", style="Card.TLabel").pack(side="left")
+        self.article_filter = tk.StringVar()
+        ttk.Entry(filters, textvariable=self.article_filter, width=18).pack(side="left", padx=(6, 16))
+        ttk.Label(filters, text="Local", style="Card.TLabel").pack(side="left")
+        self.local_filter = tk.StringVar()
+        ttk.Entry(filters, textvariable=self.local_filter, width=20).pack(side="left", padx=(6, 12))
+        ttk.Button(filters, text="Buscar", command=self.refresh_reports, style="Primary.TButton").pack(side="left", padx=4)
+        ttk.Button(filters, text="Limpiar", command=self.clear_filters, style="Secondary.TButton").pack(side="left", padx=4)
+        columns = ("remito", "articulo", "descripcion", "marca", "banner", "local", "talle", "cantidad", "estado")
+        self.reports_tree = self._tree(self.reports_tab, columns, (100, 125, 250, 90, 100, 210, 75, 90, 110))
 
-        inferior = ttk.Frame(self.tab_asignacion)
-        inferior.pack(fill="x")
-        self.lbl_restante = ttk.Label(inferior, text="")
-        self.lbl_restante.pack(side="left")
-        ttk.Button(inferior, text="Guardar asignación", command=self.guardar_asignacion).pack(side="right")
+    def _load_demo_if_empty(self) -> None:
+        if not self.store.summary() and SAMPLE_XLSX.exists():
+            self.store.import_dataframe(pd.read_excel(SAMPLE_XLSX))
 
-    def crear_distribucion(self) -> None:
-        columnas = ("remito", "articulo", "local", "talle", "cantidad")
-        self.tree_distribucion = ttk.Treeview(self.tab_distribucion, columns=columnas, show="headings")
-        for col, ancho in zip(columnas, (120, 150, 230, 90, 100)):
-            self.tree_distribucion.heading(col, text=col.upper())
-            self.tree_distribucion.column(col, width=ancho, anchor="center")
-        self.tree_distribucion.pack(fill="both", expand=True)
-
-    def crear_reportes(self) -> None:
-        filtros = ttk.Frame(self.tab_reportes)
-        filtros.pack(fill="x", pady=(0, 8))
-        ttk.Label(filtros, text="Artículo:").pack(side="left")
-        self.filtro_articulo = tk.StringVar()
-        ttk.Entry(filtros, textvariable=self.filtro_articulo, width=18).pack(side="left", padx=4)
-        ttk.Label(filtros, text="Local:").pack(side="left", padx=(12, 0))
-        self.filtro_local = tk.StringVar()
-        ttk.Entry(filtros, textvariable=self.filtro_local, width=18).pack(side="left", padx=4)
-        ttk.Button(filtros, text="Buscar", command=self.refrescar_reportes).pack(side="left", padx=8)
-        ttk.Button(filtros, text="Limpiar", command=self.limpiar_filtros).pack(side="left")
-
-        columnas = ("remito", "articulo", "descripcion", "local", "cantidad", "estado")
-        self.tree_reportes = ttk.Treeview(self.tab_reportes, columns=columnas, show="headings")
-        for col, ancho in zip(columnas, (120, 150, 280, 220, 100, 130)):
-            self.tree_reportes.heading(col, text=col.upper())
-            self.tree_reportes.column(col, width=ancho, anchor="center")
-        self.tree_reportes.pack(fill="both", expand=True)
-
-    def cargar_demo_si_vacia(self) -> None:
-        with conectar() as conn:
-            cantidad = conn.execute("SELECT COUNT(*) FROM articulos").fetchone()[0]
-        if cantidad == 0 and SAMPLE_XLSX.exists():
-            self.importar_dataframe(pd.read_excel(SAMPLE_XLSX), mostrar_mensaje=False)
-
-    def cargar_archivo_demo(self) -> None:
-        if not SAMPLE_XLSX.exists():
-            messagebox.showerror("Error", "No se encontró data/remitos_demo.xlsx")
-            return
-        self.importar_dataframe(pd.read_excel(SAMPLE_XLSX), mostrar_mensaje=True)
-
-    def cargar_excel(self) -> None:
-        ruta = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
-        if not ruta:
+    def load_excel(self) -> None:
+        path = filedialog.askopenfilename(title="Seleccionar remito", filetypes=[("Archivo Excel", "*.xlsx")])
+        if not path:
             return
         try:
-            self.importar_dataframe(pd.read_excel(ruta), mostrar_mensaje=True)
+            count = self.store.import_dataframe(pd.read_excel(path))
+            self.refresh_all()
+            messagebox.showinfo("Importación completa", f"Se importaron o actualizaron {count} artículos.")
         except Exception as exc:
-            messagebox.showerror("Error", f"No se pudo leer el archivo:\n{exc}")
+            messagebox.showerror("No se pudo importar", str(exc))
 
-    def importar_dataframe(self, df: pd.DataFrame, mostrar_mensaje: bool) -> None:
-        requeridas = {"Remito", "Family", "Size", "Quantity", "Descripcion", "Empresa", "Proveedor", "Factura"}
-        faltantes = requeridas - set(df.columns)
-        if faltantes:
-            raise ValueError("Faltan columnas: " + ", ".join(sorted(faltantes)))
-
-        with conectar() as conn:
-            for remito, grupo_remito in df.groupby("Remito"):
-                primera = grupo_remito.iloc[0]
-                conn.execute(
-                    "INSERT OR REPLACE INTO remitos(remito, empresa, proveedor, factura, fecha, estado) VALUES (?, ?, ?, ?, date('now'), COALESCE((SELECT estado FROM remitos WHERE remito=?), 'no_trabajado'))",
-                    (str(remito), str(primera["Empresa"]), str(primera["Proveedor"]), str(primera["Factura"]), str(remito)),
-                )
-                for articulo, grupo_art in grupo_remito.groupby("Family"):
-                    descripcion = str(grupo_art.iloc[0]["Descripcion"])
-                    marca = str(grupo_art.iloc[0].get("Marca", "DEMO"))
-                    conn.execute(
-                        "INSERT OR REPLACE INTO articulos(remito, articulo, descripcion, marca, estado) VALUES (?, ?, ?, ?, COALESCE((SELECT estado FROM articulos WHERE remito=? AND articulo=?), 'no_trabajado'))",
-                        (str(remito), str(articulo), descripcion, marca, str(remito), str(articulo)),
-                    )
-                    conn.execute("DELETE FROM stock_inicial WHERE remito=? AND articulo=?", (str(remito), str(articulo)))
-                    agrupado = grupo_art.groupby("Size", as_index=False)["Quantity"].sum()
-                    for _, fila in agrupado.iterrows():
-                        conn.execute(
-                            "INSERT INTO stock_inicial(remito, articulo, talle, cantidad) VALUES (?, ?, ?, ?)",
-                            (str(remito), str(articulo), str(fila["Size"]), int(fila["Quantity"])),
-                        )
-        self.refrescar_todo()
-        if mostrar_mensaje:
-            messagebox.showinfo("OK", "Archivo cargado correctamente en la base demo local.")
-
-    def refrescar_todo(self) -> None:
-        self.refrescar_resumen()
-        self.refrescar_distribucion()
-        self.refrescar_reportes()
-
-    def refrescar_resumen(self) -> None:
-        self.tree_resumen.delete(*self.tree_resumen.get_children())
-        query = """
-            SELECT a.remito, a.articulo, a.descripcion,
-                   SUM(s.cantidad) AS total, a.estado, r.empresa
-            FROM articulos a
-            JOIN remitos r ON r.remito=a.remito
-            JOIN stock_inicial s ON s.remito=a.remito AND s.articulo=a.articulo
-            GROUP BY a.remito, a.articulo, a.descripcion, a.estado, r.empresa
-            ORDER BY a.remito, a.articulo
-        """
-        with conectar() as conn:
-            for fila in conn.execute(query):
-                self.tree_resumen.insert("", "end", values=tuple(fila))
-
-    def abrir_desde_resumen(self, _event=None) -> None:
-        seleccion = self.tree_resumen.selection()
-        if not seleccion:
+    def reset_demo(self) -> None:
+        if not messagebox.askyesno("Restablecer demo", "Se eliminarán las asignaciones actuales y se recargarán los datos ficticios. ¿Continuar?"):
             return
-        valores = self.tree_resumen.item(seleccion[0], "values")
-        self.remito_actual, self.articulo_actual = str(valores[0]), str(valores[1])
-        self.notebook.select(self.tab_asignacion)
-        self.construir_grilla()
+        try:
+            self.store.reset()
+            self.store.import_dataframe(pd.read_excel(SAMPLE_XLSX))
+            self.remito_actual = self.articulo_actual = None
+            self.stock_actual = {}
+            self.article_label.config(text="Seleccioná un artículo desde Resumen")
+            self.build_assignment_grid()
+            self.refresh_all()
+        except Exception as exc:
+            messagebox.showerror("Error", str(exc))
 
-    def construir_grilla(self) -> None:
-        for widget in self.frame_grilla.winfo_children():
+    def refresh_all(self) -> None:
+        self.refresh_metrics()
+        self.refresh_summary()
+        self.refresh_distribution()
+        self.refresh_reports()
+
+    def refresh_metrics(self) -> None:
+        metrics = self.store.metrics()
+        for key, label in self.metric_labels.items():
+            label.config(text=f"{metrics.get(key, 0):,}".replace(",", "."))
+
+    def refresh_summary(self) -> None:
+        self.summary_tree.delete(*self.summary_tree.get_children())
+        for row in self.store.summary():
+            self.summary_tree.insert("", "end", values=tuple(row), tags=(row[5],))
+
+    def open_selected_article(self, _event=None) -> None:
+        selected = self.summary_tree.selection()
+        if not selected:
+            return
+        values = self.summary_tree.item(selected[0], "values")
+        self.remito_actual, self.articulo_actual = str(values[0]), str(values[1])
+        self.notebook.select(self.assignment_tab)
+        self.build_assignment_grid()
+
+    def build_assignment_grid(self) -> None:
+        for widget in self.assignment_grid.winfo_children():
             widget.destroy()
         self.entries.clear()
+        self.row_total_labels.clear()
         if not self.remito_actual or not self.articulo_actual:
+            self.remainder_label.config(text="")
             return
-
-        with conectar() as conn:
-            filas = conn.execute(
-                "SELECT talle, cantidad FROM stock_inicial WHERE remito=? AND articulo=? ORDER BY talle",
-                (self.remito_actual, self.articulo_actual),
-            ).fetchall()
-            descripcion = conn.execute(
-                "SELECT descripcion FROM articulos WHERE remito=? AND articulo=?",
-                (self.remito_actual, self.articulo_actual),
-            ).fetchone()[0]
-            previas = conn.execute(
-                "SELECT local, talle, cantidad FROM asignaciones WHERE remito=? AND articulo=?",
-                (self.remito_actual, self.articulo_actual),
-            ).fetchall()
-
-        self.talles_actuales = [str(f[0]) for f in filas]
-        self.stock_actual = {str(f[0]): int(f[1]) for f in filas}
-        mapa_previo = {(str(f[0]), str(f[1])): int(f[2]) for f in previas}
-        locales = LOCALES_POR_BANNER[self.banner_var.get()]
-
-        self.lbl_articulo.config(text=f"{self.remito_actual} · {self.articulo_actual} · {descripcion}")
-
-        ttk.Label(self.frame_grilla, text="Local", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=4, pady=4)
-        for col, talle in enumerate(self.talles_actuales, start=1):
-            ttk.Label(self.frame_grilla, text=f"{talle}\nStock: {self.stock_actual[talle]}", font=("Arial", 9, "bold")).grid(row=0, column=col, padx=4, pady=4)
-
-        for fila, local in enumerate(locales, start=1):
-            ttk.Label(self.frame_grilla, text=local).grid(row=fila, column=0, sticky="w", padx=4, pady=3)
-            for col, talle in enumerate(self.talles_actuales, start=1):
-                entry = ttk.Entry(self.frame_grilla, width=8, justify="center")
-                valor = mapa_previo.get((local, talle), 0)
-                if valor:
-                    entry.insert(0, str(valor))
-                entry.grid(row=fila, column=col, padx=4, pady=3)
-                entry.bind("<KeyRelease>", lambda _e: self.actualizar_restante())
-                self.entries[(local, talle)] = entry
-        self.actualizar_restante()
-
-    def actualizar_restante(self) -> None:
-        if not self.stock_actual:
-            self.lbl_restante.config(text="")
+        try:
+            description, self.stock_actual, previous = self.store.article_detail(self.remito_actual, self.articulo_actual)
+        except LookupError as exc:
+            messagebox.showerror("Artículo no disponible", str(exc))
             return
-        textos = []
-        for talle in self.talles_actuales:
-            asignado = 0
-            for (local, t), entry in self.entries.items():
-                if t != talle:
-                    continue
-                valor = entry.get().strip()
-                if valor.isdigit():
-                    asignado += int(valor)
-            restante = self.stock_actual[talle] - asignado
-            textos.append(f"{talle}: {restante}")
-        self.lbl_restante.config(text="Restante por talle · " + " | ".join(textos))
+        sizes = list(self.stock_actual)
+        previous_map = {(row[1], row[2]): int(row[3]) for row in previous if row[0] == self.banner_var.get()}
+        locations = [location for location in BANNERS[self.banner_var.get()] if "ALMACÉN" not in location]
+        self.article_label.config(text=f"{self.remito_actual}  ·  {self.articulo_actual}  ·  {description}")
 
-    def guardar_asignacion(self) -> None:
-        if not self.remito_actual or not self.articulo_actual:
-            return
-        nuevas: list[tuple[str, str, int]] = []
-        totales = {t: 0 for t in self.talles_actuales}
+        headers = ["DESTINO", *sizes, "TOTAL"]
+        for col, text in enumerate(headers):
+            ttk.Label(self.assignment_grid, text=text, style="Card.TLabel", font=("Segoe UI Semibold", 9)).grid(row=0, column=col, padx=7, pady=(4, 8), sticky="ew")
+        for row_index, location in enumerate(locations, start=1):
+            ttk.Label(self.assignment_grid, text=location, style="Card.TLabel").grid(row=row_index, column=0, padx=7, pady=5, sticky="w")
+            for col_index, size in enumerate(sizes, start=1):
+                entry = ttk.Entry(self.assignment_grid, width=9, justify="center")
+                value = previous_map.get((location, size), 0)
+                if value:
+                    entry.insert(0, str(value))
+                entry.grid(row=row_index, column=col_index, padx=5, pady=5)
+                entry.bind("<KeyRelease>", lambda _event: self.update_remainder())
+                self.entries[(location, size)] = entry
+            total = ttk.Label(self.assignment_grid, text="0", style="Card.TLabel", foreground=COLORS["muted"])
+            total.grid(row=row_index, column=len(sizes) + 1, padx=7)
+            self.row_total_labels[location] = total
+        stock_row = len(locations) + 2
+        ttk.Label(self.assignment_grid, text="STOCK DISPONIBLE", style="Card.TLabel", font=("Segoe UI Semibold", 9)).grid(row=stock_row, column=0, padx=7, pady=(14, 4), sticky="w")
+        for col_index, size in enumerate(sizes, start=1):
+            ttk.Label(self.assignment_grid, text=str(self.stock_actual[size]), style="Card.TLabel", foreground=COLORS["blue"], font=("Segoe UI Semibold", 10)).grid(row=stock_row, column=col_index)
+        self.update_remainder()
 
-        for (local, talle), entry in self.entries.items():
-            texto = entry.get().strip()
-            if not texto:
+    def _read_entries(self) -> list[tuple[str, str, int]]:
+        result: list[tuple[str, str, int]] = []
+        for (location, size), entry in self.entries.items():
+            text = entry.get().strip()
+            if not text:
                 continue
-            if not texto.isdigit() or int(texto) < 0:
-                messagebox.showerror("Valor inválido", f"Revisá {local} / talle {talle}.")
-                return
-            cantidad = int(texto)
-            if cantidad:
-                nuevas.append((local, talle, cantidad))
-                totales[talle] += cantidad
+            if not text.isdigit():
+                raise ValueError(f"Ingresá un entero válido en {location}, talle {size}.")
+            result.append((location, size, int(text)))
+        return result
 
-        excedidos = [t for t in self.talles_actuales if totales[t] > self.stock_actual[t]]
-        if excedidos:
-            messagebox.showerror("Stock excedido", "Se excedió el stock en: " + ", ".join(excedidos))
+    def update_remainder(self) -> None:
+        if not self.stock_actual:
+            self.remainder_label.config(text="")
             return
-
-        # El sobrante se envía automáticamente al almacén del banner.
-        almacen = next((l for l in LOCALES_POR_BANNER[self.banner_var.get()] if "ALMACEN" in l), "ALMACEN")
-        for talle in self.talles_actuales:
-            restante = self.stock_actual[talle] - totales[talle]
-            if restante > 0:
-                nuevas.append((almacen, talle, restante))
-
-        with conectar() as conn:
-            conn.execute("DELETE FROM asignaciones WHERE remito=? AND articulo=?", (self.remito_actual, self.articulo_actual))
-            conn.executemany(
-                "INSERT INTO asignaciones(remito, articulo, local, talle, cantidad) VALUES (?, ?, ?, ?, ?)",
-                [(self.remito_actual, self.articulo_actual, local, talle, cantidad) for local, talle, cantidad in nuevas],
-            )
-            conn.execute(
-                "UPDATE articulos SET estado='asignado' WHERE remito=? AND articulo=?",
-                (self.remito_actual, self.articulo_actual),
-            )
-            pendientes = conn.execute(
-                "SELECT COUNT(*) FROM articulos WHERE remito=? AND estado!='asignado'",
-                (self.remito_actual,),
-            ).fetchone()[0]
-            conn.execute(
-                "UPDATE remitos SET estado=? WHERE remito=?",
-                ("asignado" if pendientes == 0 else "parcial", self.remito_actual),
-            )
-        self.refrescar_todo()
-        messagebox.showinfo("Guardado", "Asignación guardada en SQLite. El sobrante fue enviado al almacén.")
-
-    def refrescar_distribucion(self) -> None:
-        self.tree_distribucion.delete(*self.tree_distribucion.get_children())
-        with conectar() as conn:
-            for fila in conn.execute("SELECT remito, articulo, local, talle, cantidad FROM asignaciones ORDER BY remito, articulo, local, talle"):
-                self.tree_distribucion.insert("", "end", values=tuple(fila))
-
-    def refrescar_reportes(self) -> None:
-        self.tree_reportes.delete(*self.tree_reportes.get_children())
-        articulo = f"%{self.filtro_articulo.get().strip()}%"
-        local = f"%{self.filtro_local.get().strip()}%"
-        query = """
-            SELECT a.remito, a.articulo, a.descripcion,
-                   COALESCE(asig.local, 'Pendiente de separación') AS local,
-                   COALESCE(SUM(asig.cantidad), 0) AS cantidad,
-                   a.estado
-            FROM articulos a
-            LEFT JOIN asignaciones asig ON asig.remito=a.remito AND asig.articulo=a.articulo
-            WHERE a.articulo LIKE ? AND COALESCE(asig.local, '') LIKE ?
-            GROUP BY a.remito, a.articulo, a.descripcion, asig.local, a.estado
-            ORDER BY a.remito, a.articulo, local
-        """
-        with conectar() as conn:
-            for fila in conn.execute(query, (articulo, local)):
-                self.tree_reportes.insert("", "end", values=tuple(fila))
-
-    def limpiar_filtros(self) -> None:
-        self.filtro_articulo.set("")
-        self.filtro_local.set("")
-        self.refrescar_reportes()
-
-    def exportar_reporte(self) -> None:
-        ruta = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], initialfile="reporte_distribucion_demo.xlsx")
-        if not ruta:
+        try:
+            values = self._read_entries()
+        except ValueError:
+            self.remainder_label.config(text="Revisá los valores ingresados.", foreground=COLORS["red"])
             return
-        query = """
-            SELECT a.remito, a.articulo, a.descripcion, a.marca, asig.local, asig.talle, asig.cantidad, a.estado
-            FROM articulos a
-            LEFT JOIN asignaciones asig ON asig.remito=a.remito AND asig.articulo=a.articulo
-            ORDER BY a.remito, a.articulo, asig.local, asig.talle
-        """
-        with conectar() as conn:
-            df = pd.read_sql_query(query, conn)
-        df.to_excel(ruta, index=False, sheet_name="Distribucion")
-        messagebox.showinfo("Exportado", f"Reporte guardado en:\n{ruta}")
+        totals = {size: 0 for size in self.stock_actual}
+        for _location, size, quantity in values:
+            totals[size] += quantity
+        location_totals = {location: 0 for location in self.row_total_labels}
+        for location, _size, quantity in values:
+            if location in location_totals:
+                location_totals[location] += quantity
+        for location, label in self.row_total_labels.items():
+            label.config(text=str(location_totals[location]))
+        parts = [f"{size}: {self.stock_actual[size] - totals[size]}" for size in self.stock_actual]
+        has_negative = any(self.stock_actual[size] - totals[size] < 0 for size in self.stock_actual)
+        self.remainder_label.config(text="Restante por talle  ·  " + "   |   ".join(parts) + "   ·   El remanente se envía automáticamente al almacén.", foreground=COLORS["red"] if has_negative else COLORS["muted"])
+
+    def save_assignment(self) -> None:
+        if not self.remito_actual or not self.articulo_actual:
+            messagebox.showwarning("Sin artículo", "Elegí un artículo desde la pestaña Resumen.")
+            return
+        try:
+            values = self._read_entries()
+            banner = self.banner_var.get()
+            warehouse = next(location for location in BANNERS[banner] if "ALMACÉN" in location)
+            self.store.save_assignment(self.remito_actual, self.articulo_actual, banner, values, warehouse)
+            self.refresh_all()
+            self.build_assignment_grid()
+            messagebox.showinfo("Asignación guardada", "La distribución se guardó correctamente. El remanente fue enviado al almacén.")
+        except Exception as exc:
+            messagebox.showerror("No se pudo guardar", str(exc))
+
+    def refresh_distribution(self) -> None:
+        self.distribution_tree.delete(*self.distribution_tree.get_children())
+        for row in self.store.distribution():
+            self.distribution_tree.insert("", "end", values=tuple(row))
+
+    def refresh_reports(self) -> None:
+        self.reports_tree.delete(*self.reports_tree.get_children())
+        df = self.store.report(self.article_filter.get(), self.local_filter.get())
+        for row in df.itertuples(index=False, name=None):
+            self.reports_tree.insert("", "end", values=row)
+
+    def clear_filters(self) -> None:
+        self.article_filter.set("")
+        self.local_filter.set("")
+        self.refresh_reports()
+
+    def export_report(self) -> None:
+        EXPORT_DIR.mkdir(exist_ok=True)
+        path = filedialog.asksaveasfilename(
+            title="Exportar distribución", initialdir=EXPORT_DIR,
+            initialfile="distribution_report.xlsx", defaultextension=".xlsx",
+            filetypes=[("Archivo Excel", "*.xlsx")],
+        )
+        if not path:
+            return
+        try:
+            df = self.store.report()
+            df.to_excel(path, index=False, sheet_name="Distribución")
+            workbook = load_workbook(path)
+            sheet = workbook["Distribución"]
+            header_fill = PatternFill("solid", fgColor="122033")
+            for cell in sheet[1]:
+                cell.fill = header_fill
+                cell.font = Font(color="FFFFFF", bold=True)
+                cell.alignment = Alignment(horizontal="center")
+            sheet.freeze_panes = "A2"
+            sheet.auto_filter.ref = sheet.dimensions
+            for column in range(1, sheet.max_column + 1):
+                values = [str(sheet.cell(row=row, column=column).value or "") for row in range(1, sheet.max_row + 1)]
+                sheet.column_dimensions[get_column_letter(column)].width = min(max(len(value) for value in values) + 2, 40)
+            workbook.save(path)
+            messagebox.showinfo("Reporte exportado", f"Archivo generado correctamente:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("No se pudo exportar", str(exc))
 
 
 if __name__ == "__main__":
-    DistribucionDemo().mainloop()
+    DistributionManager().mainloop()

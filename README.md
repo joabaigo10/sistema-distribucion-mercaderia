@@ -1,147 +1,125 @@
-# Sistema de Gestión y Distribución de Mercadería — Demo Portfolio
+# Distribution Manager
 
-Aplicación de escritorio desarrollada en **Python** para gestionar un flujo de distribución de mercadería entre locales, depósitos y canales de venta.
+**Aplicación de escritorio en Python para importar remitos, distribuir mercadería por local y talle, controlar remanentes y exportar reportes.**
 
-El sistema permite importar remitos desde Excel, consultar artículos, distribuir cantidades por talle y destino, controlar el stock restante, guardar la información en una base de datos local y exportar reportes.
+![Vista principal](screenshots/01_dashboard.png)
 
-> **Demo pública para portfolio.** Esta es una versión reducida de una herramienta interna. Todos los nombres, remitos, artículos, empresas y demás datos incluidos son ficticios. El proyecto no contiene credenciales, contraseñas, tokens, rutas privadas ni información real de ninguna empresa.
+> **Demo pública de portfolio.** El proyecto recrea, en una versión reducida y desacoplada, un flujo operativo real. Todos los nombres, artículos, empresas, remitos y cantidades son ficticios. No contiene credenciales ni información confidencial.
 
----
+## El problema
 
-## Funcionalidades
+La distribución manual de mercadería mediante planillas obliga a controlar artículos, talles, cantidades, destinos y sobrantes en archivos separados. Esto aumenta el trabajo operativo y facilita errores de carga o asignaciones por encima del stock disponible.
 
-- Importación de remitos desde Excel.
-- Carga automática de un archivo demo.
-- Resumen por remito y artículo.
-- Visualización de descripción, cantidad total, estado y empresa.
-- Distribución de unidades por local y talle.
-- Cálculo automático del stock restante.
-- Envío del sobrante al almacén correspondiente.
-- Persistencia local con SQLite.
-- Gestión de estados de artículos y remitos.
-- Vista consolidada de la distribución realizada.
+Distribution Manager concentra ese flujo en una sola aplicación: valida el Excel de entrada, muestra el stock por talle, impide sobreasignaciones, envía automáticamente el remanente al almacén correspondiente y mantiene trazabilidad en SQLite.
+
+## Funcionalidades principales
+
+- Importación y validación de remitos desde Excel.
+- Resumen de remitos, artículos, marcas, cantidades y estados.
+- Distribución por banner, local y talle.
+- Control de stock en tiempo real y bloqueo de sobreasignaciones.
+- Envío automático del sobrante al almacén del banner.
+- Persistencia local con SQLite y claves foráneas.
+- Reimportación segura: reemplaza el stock y elimina asignaciones incompatibles.
 - Reportes con filtros por artículo y local.
-- Exportación de reportes a Excel.
-
----
-
-## Tecnologías utilizadas
-
-- Python
-- Tkinter
-- pandas
-- SQLite
-- openpyxl
-
----
+- Exportación a Excel con encabezados, autofiltro y columnas ajustadas.
+- Datos demo restablecibles desde la interfaz.
+- Pruebas automatizadas para las reglas de negocio principales.
 
 ## Capturas
 
-### Resumen
+| Resumen ejecutivo | Asignación |
+|---|---|
+| ![Resumen](screenshots/01_dashboard.png) | ![Asignación](screenshots/02_assignment.png) |
 
-Vista general de los remitos, artículos, descripciones, cantidades y estados.
+| Distribución | Reportes |
+|---|---|
+| ![Distribución](screenshots/03_distribution.png) | ![Reportes](screenshots/04_reports.png) |
 
-![Resumen del sistema](screenshots/01_resumen.png)
+## Tecnologías
 
-### Asignación
+- Python 3.10+
+- Tkinter / ttk
+- pandas
+- SQLite
+- openpyxl
+- pytest
 
-Distribución manual de cantidades por local y talle, con control automático del stock restante.
-
-![Asignación por local y talle](screenshots/02_asignacion.png)
-
-### Distribución
-
-Vista consolidada de las unidades asignadas a cada destino.
-
-![Distribución final](screenshots/03_distribucion.png)
-
-### Reportes
-
-Consulta de resultados con filtros por artículo y local.
-
-![Consulta de reportes](screenshots/04_reportes.png)
-
----
-
-## Estructura del proyecto
+## Arquitectura
 
 ```text
-Distribucion_Portfolio_Real/
+Excel de entrada
+      │
+      ▼
+Validación con pandas
+      │
+      ▼
+DistributionStore ─────► SQLite
+      │                    │
+      ▼                    ▼
+Interfaz Tkinter       Consultas y estados
+      │
+      ▼
+Reporte Excel formateado
+```
+
+La lógica de datos y las reglas de negocio están separadas de la interfaz en `data_store.py`, lo que permite probarlas sin abrir la aplicación gráfica.
+
+## Estructura
+
+```text
+Distribution_Manager_Portfolio/
+├── app.py
+├── data_store.py
 ├── data/
 │   └── remitos_demo.xlsx
+├── docs/
+│   ├── LINKEDIN.md
+│   ├── OUTLIER_INTERVIEW.md
+│   └── PROJECT_OVERVIEW_EN.md
 ├── screenshots/
-│   ├── 01_resumen.png
-│   ├── 02_asignacion.png
-│   ├── 03_distribucion.png
-│   └── 04_reportes.png
-├── app.py
+│   ├── 01_dashboard.png
+│   ├── 02_assignment.png
+│   ├── 03_distribution.png
+│   └── 04_reports.png
+├── tests/
+│   └── test_data_store.py
 ├── requirements.txt
+├── requirements-dev.txt
 ├── .gitignore
+├── LICENSE
 └── README.md
 ```
 
-La base de datos SQLite se genera localmente al ejecutar la aplicación.
-
----
+La base `data/distribution_demo.db` se genera al ejecutar la aplicación y está excluida del repositorio.
 
 ## Instalación
 
-### 1. Clonar el repositorio
-
 ```bash
-git clone URL_DEL_REPOSITORIO
-cd Distribucion_Portfolio_Real
+git clone https://github.com/joabaigo10/Distribution-Manager.git
+cd Distribution_Manager_Portfolio
+python -m venv .venv
 ```
 
-### 2. Crear un entorno virtual
+Windows:
 
 ```bash
-python -m venv venv
-```
-
-### 3. Activar el entorno virtual
-
-En Windows:
-
-```bash
-venv\Scripts\activate
-```
-
-En Linux o macOS:
-
-```bash
-source venv/bin/activate
-```
-
-### 4. Instalar las dependencias
-
-```bash
+.venv\Scripts\activate
 python -m pip install -r requirements.txt
-```
-
----
-
-## Ejecución
-
-```bash
 python app.py
 ```
 
-La aplicación carga automáticamente el archivo:
+Linux o macOS:
 
-```text
-data/remitos_demo.xlsx
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py
 ```
 
-cuando la base demo está vacía.
+## Formato del Excel
 
-También se puede utilizar el botón **Cargar archivo demo** desde la interfaz.
-
----
-
-## Formato del archivo Excel
-
-El archivo debe contener las siguientes columnas:
+Columnas obligatorias:
 
 - `Remito`
 - `Family`
@@ -151,67 +129,55 @@ El archivo debe contener las siguientes columnas:
 - `Empresa`
 - `Proveedor`
 - `Factura`
-- `Marca` — opcional
 
----
+Columna opcional: `Marca`.
 
-## Flujo recomendado para probar la aplicación
+`Quantity` debe contener números enteros no negativos. Las celdas obligatorias vacías son rechazadas con un mensaje descriptivo.
 
-1. Abrir la pestaña **Resumen**.
-2. Hacer doble clic en un artículo.
-3. Elegir un banner.
-4. Distribuir las cantidades por local y talle.
+## Cómo probarlo
+
+1. Ejecutar `python app.py`.
+2. Abrir **Resumen** y hacer doble clic sobre un artículo.
+3. Seleccionar un banner.
+4. Ingresar cantidades por local y talle.
 5. Guardar la asignación.
-6. Revisar el resultado en **Distribución**.
-7. Consultar y filtrar la información en **Reportes**.
-8. Exportar el reporte a Excel.
+6. Revisar **Distribución** y **Reportes**.
+7. Exportar el resultado a Excel.
+8. Usar **Restablecer demo** para comenzar nuevamente.
 
----
+## Pruebas
 
-## Datos y seguridad
+```bash
+python -m pip install -r requirements-dev.txt
+pytest -q
+```
 
-Esta versión fue preparada exclusivamente para su publicación como proyecto de portfolio:
+Las pruebas verifican importación, métricas, asignación de remanentes, bloqueo de sobrestock y reimportación segura.
 
-- No contiene contraseñas.
-- No contiene tokens ni claves de API.
-- No contiene rutas privadas del equipo original.
-- No incluye datos reales de clientes, empleados o empresas.
-- Utiliza remitos, artículos, nombres y cantidades ficticias.
-- La base SQLite se genera y utiliza de forma local.
-- Los archivos de base de datos y caché pueden excluirse mediante `.gitignore`.
+## Decisiones técnicas
 
----
+- **SQLite:** permite distribuir una demo autocontenida, sin configurar servidores ni credenciales.
+- **Capa de datos separada:** evita acoplar SQL y reglas de negocio a los widgets.
+- **Transacciones:** una importación o asignación se guarda de manera consistente.
+- **Datos ficticios:** preservan la confidencialidad del sistema original.
+- **Tkinter:** fue elegido por su disponibilidad en Python y su facilidad de despliegue en entornos Windows.
 
-## Objetivo del proyecto
+## Alcance de la versión pública
 
-Este proyecto demuestra experiencia práctica en:
+La solución original que inspiró esta demo incluye más reglas operativas, usuarios simultáneos, bloqueos, configuraciones por banner y reportes internos. Esta versión se redujo deliberadamente para mostrar el enfoque técnico sin publicar procesos ni información de la organización.
 
-- Desarrollo de aplicaciones de escritorio.
-- Automatización de procesos operativos y administrativos.
-- Manipulación y validación de datos.
-- Integración con archivos Excel.
-- Persistencia de información con SQLite.
-- Diseño de interfaces orientadas a usuarios operativos.
-- Control de stock y distribución por destino.
-- Generación y exportación de reportes.
+## Próximos pasos posibles
 
----
-
-## Posibles mejoras
-
-- Incorporar autenticación de usuarios.
-- Agregar perfiles y permisos.
-- Mejorar el diseño visual de la interfaz.
-- Incorporar indicadores y gráficos.
-- Agregar pruebas automatizadas.
-- Empaquetar la aplicación como ejecutable.
-- Migrar la solución a una versión web.
-
----
+- Migración a FastAPI + React.
+- Autenticación y permisos.
+- Base centralizada para múltiples usuarios.
+- Historial de auditoría.
+- Empaquetado con instalador para Windows.
+- Indicadores y gráficos operativos.
 
 ## Autor
 
-**JOAQUIN BAIGORRIA**
+**Joaquín Baigorria**
 
-- LinkedIn: https://www.linkedin.com/in/joaquin-baigorria-5224b0a0/
-- GitHub: https://github.com/joabaigo10
+- LinkedIn: `https://www.linkedin.com/in/joaquin-baigorria-5224b0a0/`
+- GitHub: `https://github.com/joabaigo10`
